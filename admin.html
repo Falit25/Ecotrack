@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Panel - EcoTrack</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
     <header>
@@ -20,7 +20,10 @@
             <form onsubmit="adminLogin(event)">
                 <div class="input-group">
                     <label for="adminPassword">Admin Password:</label>
-                    <input type="password" id="adminPassword" required>
+                    <div style="position: relative;">
+                        <input type="password" id="adminPassword" required>
+                        <span onclick="togglePassword('adminPassword')" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); cursor: pointer;">👁️</span>
+                    </div>
                 </div>
                 <button type="submit" class="btn">Login as Admin</button>
             </form>
@@ -316,6 +319,18 @@
             
             event.target.classList.add('active');
             document.getElementById(tab + 'Tab').style.display = 'block';
+        }
+
+        function togglePassword(inputId) {
+            const input = document.getElementById(inputId);
+            const icon = input.nextElementSibling;
+            if (input.type === 'password') {
+                input.type = 'text';
+                icon.textContent = '🙈';
+            } else {
+                input.type = 'password';
+                icon.textContent = '👁️';
+            }
         }
 
         document.addEventListener('DOMContentLoaded', function() {
