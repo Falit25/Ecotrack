@@ -13,6 +13,7 @@ const ADMIN_PASSWORD = 'admin123'; // Change this
 // Middleware
 app.use(express.json());
 app.use(express.static('.'));
+app.use('/uploads', express.static('uploads'));
 
 // Create uploads directory
 if (!fs.existsSync('uploads')) {
@@ -283,6 +284,49 @@ app.put('/api/admin/user/:id/suspend', authenticateAdmin, (req, res) => {
     
     db.run('UPDATE users SET suspended = ? WHERE id = ?', [suspended ? 1 : 0, userId], (err) => {
         if (err) return res.status(500).json({ error: 'Failed to update user' });
+        res.json({ success: true });
+    });
+});
+
+app.get('/api/admin/submissions', authenticateAdmin, (req, res) => {
+    db.all(`SELECT s.*, u.username 
+            FROM submissions s 
+            LEFT JOIN users u ON s.user_id = u.id 
+            ORDER BY s.submitted_at DESC`, (err, submissions) => {
+        if (err) return res.status(500).json({ error: 'Failed to load submissions' });
+        res.json(submissions);
+    });
+});
+
+app.put('/api/admin/submission/:id/approve', authenticateAdmin, (req, res) => {
+    const submissionId = req.params.id;
+    const { points } = req.body;
+    
+    db.serialize(() => {
+        db.get('SELECT * FROM submissions WHERE id = ?', [submissionId], (err, submission) => {
+            if (err || !submission) {
+                return res.status(404).json({ error: 'Submission not found' });
+            }
+            
+            db.run('UPDATE submissions SET status = ?, points = ?, reviewed_at = CURRENT_TIMESTAMP WHERE id = ?',
+                ['approved', points, submissionId]);
+            
+            db.run('UPDATE users SET points = points + ? WHERE id = ?', [points, submission.user_id]);
+            
+            db.run('INSERT INTO rewards (user_id, points, description) VALUES (?, ?, ?)',
+                [submission.user_id, points, 'Evidence submission approved']);
+        });
+    });
+    
+    res.json({ success: true });
+});
+
+app.put('/api/admin/submission/:id/reject', authenticateAdmin, (req, res) => {
+    const submissionId = req.params.id;
+    
+    db.run('UPDATE submissions SET status = ?, reviewed_at = CURRENT_TIMESTAMP WHERE id = ?',
+        ['rejected', submissionId], (err) => {
+        if (err) return res.status(500).json({ error: 'Failed to reject submission' });
         res.json({ success: true });
     });
 });
