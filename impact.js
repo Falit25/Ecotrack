@@ -253,18 +253,20 @@ function createImpactChart(userFootprint) {
         ctx.fillRect(x, y, barWidth, barHeight);
         
         // Draw value on top
-        ctx.fillStyle = '#333';
-        ctx.font = '12px Arial';
+        ctx.fillStyle = '#000000';
+        ctx.font = 'bold 14px Arial';
         ctx.textAlign = 'center';
         ctx.fillText(item.value.toFixed(1), x + barWidth/2, y - 5);
         
         // Draw label
+        ctx.fillStyle = '#000000';
+        ctx.font = 'bold 12px Arial';
         ctx.fillText(item.label, x + barWidth/2, chartTop + chartHeight + 20);
     });
     
     // Draw title
-    ctx.fillStyle = '#333';
-    ctx.font = 'bold 14px Arial';
+    ctx.fillStyle = '#000000';
+    ctx.font = 'bold 16px Arial';
     ctx.textAlign = 'center';
     ctx.fillText('Carbon Footprint Comparison (tons CO₂/year)', canvas.width/2, 20);
 }
