@@ -18,8 +18,8 @@
             <h2>Take Action for Our Planet</h2>
             <p>Discover your environmental impact and learn how to make a difference</p>
             <div style="text-align: center; margin-top: 2rem;">
-                <a href="login.html" class="btn" style="margin-right: 1rem;">Login / Register</a>
                 <a href="dashboard.html" class="btn" style="margin-right: 1rem;">Dashboard</a>
+                <a href="login.html" class="btn" style="margin-right: 1rem;">Login / Register</a>
                 <a href="admin.html" class="btn">Admin Panel</a>
             </div>
         </div>
@@ -60,11 +60,15 @@
     </footer>
 
     <script>
-        // Check if user is logged in
+        // Update navigation based on login status
         document.addEventListener('DOMContentLoaded', function() {
             const token = localStorage.getItem('token');
-            if (!token) {
-                window.location.href = 'login.html';
+            const user = JSON.parse(localStorage.getItem('user') || '{}');
+            
+            if (token && user.username) {
+                // User is logged in - show welcome message
+                const header = document.querySelector('header p');
+                header.textContent = `Welcome back, ${user.username}! Track your environmental impact`;
             }
         });
     </script>
