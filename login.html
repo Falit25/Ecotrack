@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login - EcoTrack</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
     <header>
@@ -29,7 +29,10 @@
                     </div>
                     <div class="input-group">
                         <label for="loginPassword">Password:</label>
-                        <input type="password" id="loginPassword" required>
+                        <div style="position: relative;">
+                            <input type="password" id="loginPassword" required>
+                            <span onclick="togglePassword('loginPassword')" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); cursor: pointer;">👁️</span>
+                        </div>
                     </div>
                     <button type="submit" class="btn">Login</button>
                 </form>
@@ -48,7 +51,10 @@
                     </div>
                     <div class="input-group">
                         <label for="regPassword">Password:</label>
-                        <input type="password" id="regPassword" required>
+                        <div style="position: relative;">
+                            <input type="password" id="regPassword" required>
+                            <span onclick="togglePassword('regPassword')" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); cursor: pointer;">👁️</span>
+                        </div>
                     </div>
                     <button type="submit" class="btn">Register</button>
                 </form>
@@ -140,6 +146,18 @@
         }
 
 
+
+        function togglePassword(inputId) {
+            const input = document.getElementById(inputId);
+            const icon = input.nextElementSibling;
+            if (input.type === 'password') {
+                input.type = 'text';
+                icon.textContent = '🙈';
+            } else {
+                input.type = 'password';
+                icon.textContent = '👁️';
+            }
+        }
 
         document.addEventListener('DOMContentLoaded', function() {
 
