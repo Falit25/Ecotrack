@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Panel - EcoTrack</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
     <header>
@@ -117,6 +117,7 @@
                     const users = await response.json();
                     displayUsers(users);
                     updateStats(users);
+                    loadSubmissions();
                 } else {
                     logout();
                 }
@@ -310,6 +311,115 @@
                 }
             } catch (error) {
                 alert(`Failed to ${action} user`);
+            }
+        }
+
+        async function loadSubmissions() {
+            const token = localStorage.getItem('adminToken');
+            try {
+                const response = await fetch('/api/admin/submissions', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                if (response.ok) {
+                    const submissions = await response.json();
+                    displaySubmissions(submissions);
+                    updatePendingCount(submissions);
+                }
+            } catch (error) {
+                document.getElementById('submissionsTable').innerHTML = '<p>Failed to load submissions</p>';
+            }
+        }
+
+        function displaySubmissions(submissions) {
+            const container = document.getElementById('submissionsTable');
+            
+            if (submissions.length === 0) {
+                container.innerHTML = '<p>No submissions yet.</p>';
+                return;
+            }
+
+            container.innerHTML = `
+                <table style="width: 100%; border-collapse: collapse; background: var(--card-bg); border-radius: 10px; overflow: hidden;">
+                    <thead style="background: var(--option-bg);">
+                        <tr>
+                            <th style="padding: 1rem; text-align: left; border-bottom: 1px solid var(--border-color);">ID</th>
+                            <th style="padding: 1rem; text-align: left; border-bottom: 1px solid var(--border-color);">User</th>
+                            <th style="padding: 1rem; text-align: left; border-bottom: 1px solid var(--border-color);">File</th>
+                            <th style="padding: 1rem; text-align: left; border-bottom: 1px solid var(--border-color);">Description</th>
+                            <th style="padding: 1rem; text-align: left; border-bottom: 1px solid var(--border-color);">Status</th>
+                            <th style="padding: 1rem; text-align: left; border-bottom: 1px solid var(--border-color);">Submitted</th>
+                            <th style="padding: 1rem; text-align: left; border-bottom: 1px solid var(--border-color);">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${submissions.map(sub => `
+                            <tr style="border-bottom: 1px solid var(--border-color);">
+                                <td style="padding: 0.8rem;">${sub.id}</td>
+                                <td style="padding: 0.8rem; font-weight: bold;">${sub.username || 'Unknown'}</td>
+                                <td style="padding: 0.8rem;"><a href="/uploads/${sub.filename}" target="_blank">${sub.filename}</a></td>
+                                <td style="padding: 0.8rem;">${sub.description || 'No description'}</td>
+                                <td style="padding: 0.8rem;"><span class="status-${sub.status}">${sub.status.toUpperCase()}</span></td>
+                                <td style="padding: 0.8rem;">${new Date(sub.submitted_at).toLocaleDateString()}</td>
+                                <td style="padding: 0.8rem;">
+                                    ${sub.status === 'pending' ? `
+                                        <button class="btn" onclick="approveSubmission(${sub.id})" style="background: #28a745; margin-right: 0.5rem; padding: 0.3rem 0.8rem; font-size: 0.8rem;">Approve</button>
+                                        <button class="btn" onclick="rejectSubmission(${sub.id})" style="background: #dc3545; padding: 0.3rem 0.8rem; font-size: 0.8rem;">Reject</button>
+                                    ` : `<span>Reviewed</span>`}
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function updatePendingCount(submissions) {
+            const pendingCount = submissions.filter(sub => sub.status === 'pending').length;
+            document.getElementById('pendingSubmissions').textContent = pendingCount;
+        }
+
+        async function approveSubmission(submissionId) {
+            const points = prompt('Enter points to award (default: 5):', '5');
+            if (!points) return;
+
+            const token = localStorage.getItem('adminToken');
+            try {
+                const response = await fetch(`/api/admin/submission/${submissionId}/approve`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ points: parseInt(points) })
+                });
+
+                if (response.ok) {
+                    alert('Submission approved!');
+                    loadSubmissions();
+                    loadAdminData();
+                }
+            } catch (error) {
+                alert('Failed to approve submission');
+            }
+        }
+
+        async function rejectSubmission(submissionId) {
+            if (!confirm('Are you sure you want to reject this submission?')) return;
+
+            const token = localStorage.getItem('adminToken');
+            try {
+                const response = await fetch(`/api/admin/submission/${submissionId}/reject`, {
+                    method: 'PUT',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                if (response.ok) {
+                    alert('Submission rejected');
+                    loadSubmissions();
+                }
+            } catch (error) {
+                alert('Failed to reject submission');
             }
         }
 
