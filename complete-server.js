@@ -15,24 +15,30 @@ const ADMIN_PASSWORD = 'admin123'; // Change this
 // Middleware
 app.use(express.json());
 app.use(express.static('.'));
-app.use('/uploads', express.static('uploads'));
+app.use('/uploads', express.static(uploadsDir));
 
-// Create uploads directory
-if (!fs.existsSync('uploads')) {
-    fs.mkdirSync('uploads');
+// Create uploads directory for Render
+const uploadsDir = process.env.NODE_ENV === 'production' 
+    ? '/opt/render/project/data/uploads'
+    : 'uploads';
+
+if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
 // Multer setup for file uploads
 const storage = multer.diskStorage({
-    destination: 'uploads/',
+    destination: uploadsDir,
     filename: (req, file, cb) => {
         cb(null, Date.now() + '-' + file.originalname);
     }
 });
 const upload = multer({ storage });
 
-// Initialize database in persistent location
-const dbPath = process.env.DB_PATH || path.join(require('os').homedir(), 'ecotrack-data', 'ecotrack.db');
+// Initialize database for Render persistent disk
+const dbPath = process.env.NODE_ENV === 'production' 
+    ? '/opt/render/project/data/ecotrack.db'
+    : path.join(os.homedir(), 'ecotrack-data', 'ecotrack.db');
 
 // Create data directory if it doesn't exist
 const dbDir = path.dirname(dbPath);
