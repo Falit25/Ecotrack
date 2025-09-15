@@ -5,28 +5,24 @@ const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const os = require('os');
 require('dotenv').config();
 
 const app = express();
-const JWT_SECRET = 'your-secret-key-change-this';
-const ADMIN_PASSWORD = 'admin123'; // Change this
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
+
+// Create uploads directory
+const uploadsDir = 'uploads';
+if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+}
 
 // Middleware
 app.use(express.json());
 app.use(express.static('.'));
 app.use('/uploads', express.static(uploadsDir));
 
-// Create uploads directory for Render
-const uploadsDir = process.env.NODE_ENV === 'production' 
-    ? '/opt/render/project/data/uploads'
-    : 'uploads';
-
-if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir, { recursive: true });
-}
-
-// Multer setup for file uploads
+// Multer setup
 const storage = multer.diskStorage({
     destination: uploadsDir,
     filename: (req, file, cb) => {
@@ -35,54 +31,59 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// Initialize PostgreSQL connection
+// Database connection
 const db = new Pool({
-    connectionString: process.env.DATABASE_URL || 'sqlite://ecotrack.db',
+    connectionString: process.env.DATABASE_URL,
     ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
 
-// Create tables
+// Initialize database
 const initDB = async () => {
-    await db.query(`CREATE TABLE IF NOT EXISTS users (
-        id SERIAL PRIMARY KEY,
-        username TEXT UNIQUE,
-        email TEXT UNIQUE,
-        password TEXT,
-        points INTEGER DEFAULT 0,
-        level INTEGER DEFAULT 1,
-        suspended INTEGER DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )`);
+    try {
+        await db.query(`CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            username TEXT UNIQUE,
+            email TEXT UNIQUE,
+            password TEXT,
+            points INTEGER DEFAULT 0,
+            level INTEGER DEFAULT 1,
+            suspended INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )`);
 
-    await db.query(`CREATE TABLE IF NOT EXISTS quiz_results (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER REFERENCES users(id),
-        score INTEGER,
-        carbon_footprint REAL,
-        answers TEXT,
-        completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )`);
+        await db.query(`CREATE TABLE IF NOT EXISTS quiz_results (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id),
+            score INTEGER,
+            carbon_footprint REAL,
+            answers TEXT,
+            completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )`);
 
-    await db.query(`CREATE TABLE IF NOT EXISTS rewards (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER REFERENCES users(id),
-        points INTEGER,
-        description TEXT,
-        earned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )`);
+        await db.query(`CREATE TABLE IF NOT EXISTS rewards (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id),
+            points INTEGER,
+            description TEXT,
+            earned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )`);
 
-    await db.query(`CREATE TABLE IF NOT EXISTS submissions (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER REFERENCES users(id),
-        filename TEXT,
-        description TEXT,
-        status TEXT DEFAULT 'pending',
-        points INTEGER DEFAULT 0,
-        submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        reviewed_at TIMESTAMP
-    )`);
+        await db.query(`CREATE TABLE IF NOT EXISTS submissions (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id),
+            filename TEXT,
+            description TEXT,
+            status TEXT DEFAULT 'pending',
+            points INTEGER DEFAULT 0,
+            submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            reviewed_at TIMESTAMP
+        )`);
+        
+        console.log('Database initialized');
+    } catch (err) {
+        console.error('Database init error:', err);
+    }
 };
-initDB();
 
 // Auth middleware
 const authenticateToken = (req, res, next) => {
@@ -107,28 +108,31 @@ app.post('/api/register', async (req, res) => {
     try {
         const hashedPassword = await bcrypt.hash(password, 10);
         
-        db.run('INSERT INTO users (username, email, password) VALUES (?, ?, ?)', 
-            [username, email, hashedPassword], function(err) {
-            if (err) {
-                return res.status(400).json({ error: 'Username or email already exists' });
-            }
-            
-            const token = jwt.sign({ id: this.lastID, username }, JWT_SECRET);
-            res.json({ 
-                token, 
-                user: { id: this.lastID, username, email, points: 0, level: 1 }
-            });
+        const result = await db.query(
+            'INSERT INTO users (username, email, password) VALUES ($1, $2, $3) RETURNING id',
+            [username, email, hashedPassword]
+        );
+        
+        const userId = result.rows[0].id;
+        const token = jwt.sign({ id: userId, username }, JWT_SECRET);
+        
+        res.json({ 
+            token, 
+            user: { id: userId, username, email, points: 0, level: 1 }
         });
     } catch (error) {
-        res.status(500).json({ error: 'Registration failed' });
+        res.status(400).json({ error: 'Username or email already exists' });
     }
 });
 
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
     const { username, password } = req.body;
     
-    db.get('SELECT * FROM users WHERE username = ?', [username], async (err, user) => {
-        if (err || !user) {
+    try {
+        const result = await db.query('SELECT * FROM users WHERE username = $1', [username]);
+        const user = result.rows[0];
+        
+        if (!user) {
             return res.status(401).json({ error: 'Invalid credentials' });
         }
         
@@ -152,53 +156,82 @@ app.post('/api/login', (req, res) => {
                 level: user.level 
             }
         });
-    });
+    } catch (error) {
+        res.status(500).json({ error: 'Login failed' });
+    }
 });
 
-app.get('/api/profile', authenticateToken, (req, res) => {
-    db.get('SELECT id, username, email, points, level FROM users WHERE id = ?', 
-        [req.user.id], (err, user) => {
-        if (err || !user) {
+app.get('/api/profile', authenticateToken, async (req, res) => {
+    try {
+        const result = await db.query(
+            'SELECT id, username, email, points, level FROM users WHERE id = $1',
+            [req.user.id]
+        );
+        
+        if (result.rows.length === 0) {
             return res.status(404).json({ error: 'User not found' });
         }
-        res.json(user);
-    });
+        
+        res.json(result.rows[0]);
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to load profile' });
+    }
 });
 
-app.post('/api/quiz/submit', authenticateToken, (req, res) => {
+app.post('/api/quiz/submit', authenticateToken, async (req, res) => {
     const { score, carbonFootprint, answers } = req.body;
-    const points = 10; // Points for completing quiz
+    const points = 10;
     
-    db.serialize(() => {
-        db.run('INSERT INTO quiz_results (user_id, score, carbon_footprint, answers) VALUES (?, ?, ?, ?)',
-            [req.user.id, score, carbonFootprint, JSON.stringify(answers)]);
+    try {
+        await db.query('BEGIN');
         
-        db.run('UPDATE users SET points = points + ? WHERE id = ?', [points, req.user.id]);
+        await db.query(
+            'INSERT INTO quiz_results (user_id, score, carbon_footprint, answers) VALUES ($1, $2, $3, $4)',
+            [req.user.id, score, carbonFootprint, JSON.stringify(answers)]
+        );
         
-        db.run('INSERT INTO rewards (user_id, points, description) VALUES (?, ?, ?)',
-            [req.user.id, points, 'Completed carbon footprint quiz']);
-    });
-    
-    res.json({ success: true, points });
+        await db.query(
+            'UPDATE users SET points = points + $1 WHERE id = $2',
+            [points, req.user.id]
+        );
+        
+        await db.query(
+            'INSERT INTO rewards (user_id, points, description) VALUES ($1, $2, $3)',
+            [req.user.id, points, 'Completed carbon footprint quiz']
+        );
+        
+        await db.query('COMMIT');
+        res.json({ success: true, points });
+    } catch (error) {
+        await db.query('ROLLBACK');
+        res.status(500).json({ error: 'Quiz submission failed' });
+    }
 });
 
-app.get('/api/rewards', authenticateToken, (req, res) => {
-    db.all('SELECT * FROM rewards WHERE user_id = ? ORDER BY earned_at DESC LIMIT 10',
-        [req.user.id], (err, rewards) => {
-        if (err) return res.status(500).json({ error: 'Failed to load rewards' });
-        res.json(rewards);
-    });
+app.get('/api/rewards', authenticateToken, async (req, res) => {
+    try {
+        const result = await db.query(
+            'SELECT * FROM rewards WHERE user_id = $1 ORDER BY earned_at DESC LIMIT 10',
+            [req.user.id]
+        );
+        res.json(result.rows);
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to load rewards' });
+    }
 });
 
-app.get('/api/leaderboard', (req, res) => {
-    db.all('SELECT username, points, level FROM users WHERE suspended = 0 ORDER BY points DESC LIMIT 10',
-        (err, users) => {
-        if (err) return res.status(500).json({ error: 'Failed to load leaderboard' });
-        res.json(users);
-    });
+app.get('/api/leaderboard', async (req, res) => {
+    try {
+        const result = await db.query(
+            'SELECT username, points, level FROM users WHERE suspended = 0 ORDER BY points DESC LIMIT 10'
+        );
+        res.json(result.rows);
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to load leaderboard' });
+    }
 });
 
-app.post('/api/submit', authenticateToken, upload.single('file'), (req, res) => {
+app.post('/api/submit', authenticateToken, upload.single('file'), async (req, res) => {
     const { description } = req.body;
     const filename = req.file ? req.file.filename : null;
     
@@ -206,11 +239,15 @@ app.post('/api/submit', authenticateToken, upload.single('file'), (req, res) => 
         return res.status(400).json({ error: 'File required' });
     }
     
-    db.run('INSERT INTO submissions (user_id, filename, description) VALUES (?, ?, ?)',
-        [req.user.id, filename, description], function(err) {
-        if (err) return res.status(500).json({ error: 'Submission failed' });
-        res.json({ success: true, id: this.lastID });
-    });
+    try {
+        const result = await db.query(
+            'INSERT INTO submissions (user_id, filename, description) VALUES ($1, $2, $3) RETURNING id',
+            [req.user.id, filename, description]
+        );
+        res.json({ success: true, id: result.rows[0].id });
+    } catch (error) {
+        res.status(500).json({ error: 'Submission failed' });
+    }
 });
 
 // Admin routes
@@ -241,105 +278,27 @@ const authenticateAdmin = (req, res, next) => {
     });
 };
 
-app.get('/api/admin/users', authenticateAdmin, (req, res) => {
-    db.all(`SELECT u.*, 
-            COUNT(qr.id) as quiz_count
+app.get('/api/admin/users', authenticateAdmin, async (req, res) => {
+    try {
+        const result = await db.query(`
+            SELECT u.*, COUNT(qr.id) as quiz_count
             FROM users u 
             LEFT JOIN quiz_results qr ON u.id = qr.user_id 
             GROUP BY u.id 
-            ORDER BY u.created_at DESC`, (err, users) => {
-        if (err) return res.status(500).json({ error: 'Failed to load users' });
-        res.json(users);
-    });
-});
-
-app.get('/api/admin/user/:id', authenticateAdmin, (req, res) => {
-    const userId = req.params.id;
-    
-    db.get('SELECT * FROM users WHERE id = ?', [userId], (err, user) => {
-        if (err || !user) return res.status(404).json({ error: 'User not found' });
-        
-        db.all('SELECT * FROM quiz_results WHERE user_id = ? ORDER BY completed_at DESC',
-            [userId], (err, quizzes) => {
-            
-            db.all('SELECT * FROM rewards WHERE user_id = ? ORDER BY earned_at DESC',
-                [userId], (err, rewards) => {
-                
-                res.json({ user, quizzes, rewards });
-            });
-        });
-    });
-});
-
-app.delete('/api/admin/user/:id', authenticateAdmin, (req, res) => {
-    const userId = req.params.id;
-    
-    db.serialize(() => {
-        db.run('DELETE FROM rewards WHERE user_id = ?', [userId]);
-        db.run('DELETE FROM quiz_results WHERE user_id = ?', [userId]);
-        db.run('DELETE FROM submissions WHERE user_id = ?', [userId]);
-        db.run('DELETE FROM users WHERE id = ?', [userId], function(err) {
-            if (err) return res.status(500).json({ error: 'Failed to delete user' });
-            res.json({ success: true });
-        });
-    });
-});
-
-app.put('/api/admin/user/:id/suspend', authenticateAdmin, (req, res) => {
-    const userId = req.params.id;
-    const { suspended } = req.body;
-    
-    db.run('UPDATE users SET suspended = ? WHERE id = ?', [suspended ? 1 : 0, userId], (err) => {
-        if (err) return res.status(500).json({ error: 'Failed to update user' });
-        res.json({ success: true });
-    });
-});
-
-app.get('/api/admin/submissions', authenticateAdmin, (req, res) => {
-    db.all(`SELECT s.*, u.username 
-            FROM submissions s 
-            LEFT JOIN users u ON s.user_id = u.id 
-            ORDER BY s.submitted_at DESC`, (err, submissions) => {
-        if (err) return res.status(500).json({ error: 'Failed to load submissions' });
-        res.json(submissions);
-    });
-});
-
-app.put('/api/admin/submission/:id/approve', authenticateAdmin, (req, res) => {
-    const submissionId = req.params.id;
-    const { points } = req.body;
-    
-    db.serialize(() => {
-        db.get('SELECT * FROM submissions WHERE id = ?', [submissionId], (err, submission) => {
-            if (err || !submission) {
-                return res.status(404).json({ error: 'Submission not found' });
-            }
-            
-            db.run('UPDATE submissions SET status = ?, points = ?, reviewed_at = CURRENT_TIMESTAMP WHERE id = ?',
-                ['approved', points, submissionId]);
-            
-            db.run('UPDATE users SET points = points + ? WHERE id = ?', [points, submission.user_id]);
-            
-            db.run('INSERT INTO rewards (user_id, points, description) VALUES (?, ?, ?)',
-                [submission.user_id, points, 'Evidence submission approved']);
-        });
-    });
-    
-    res.json({ success: true });
-});
-
-app.put('/api/admin/submission/:id/reject', authenticateAdmin, (req, res) => {
-    const submissionId = req.params.id;
-    
-    db.run('UPDATE submissions SET status = ?, reviewed_at = CURRENT_TIMESTAMP WHERE id = ?',
-        ['rejected', submissionId], (err) => {
-        if (err) return res.status(500).json({ error: 'Failed to reject submission' });
-        res.json({ success: true });
-    });
+            ORDER BY u.created_at DESC
+        `);
+        res.json(result.rows);
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to load users' });
+    }
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`EcoTrack server running on port ${PORT}`);
-    console.log(`Admin password: ${ADMIN_PASSWORD}`);
+
+// Start server after DB init
+initDB().then(() => {
+    app.listen(PORT, '0.0.0.0', () => {
+        console.log(`EcoTrack server running on port ${PORT}`);
+        console.log(`Admin password: ${ADMIN_PASSWORD}`);
+    });
 });
