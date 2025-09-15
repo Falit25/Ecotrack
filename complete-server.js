@@ -5,6 +5,8 @@ const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
+require('dotenv').config();
 
 const app = express();
 const JWT_SECRET = 'your-secret-key-change-this';
@@ -29,8 +31,16 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// Initialize database
-const db = new sqlite3.Database('ecotrack.db');
+// Initialize database in persistent location
+const dbPath = process.env.DB_PATH || path.join(require('os').homedir(), 'ecotrack-data', 'ecotrack.db');
+
+// Create data directory if it doesn't exist
+const dbDir = path.dirname(dbPath);
+if (!fs.existsSync(dbDir)) {
+    fs.mkdirSync(dbDir, { recursive: true });
+}
+
+const db = new sqlite3.Database(dbPath);
 
 // Create tables
 db.serialize(() => {
