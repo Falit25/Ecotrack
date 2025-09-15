@@ -1,5 +1,5 @@
 const express = require('express');
-const sqlite3 = require('sqlite3').verbose();
+const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
@@ -35,63 +35,54 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// Initialize database for Render persistent disk
-const dbPath = process.env.NODE_ENV === 'production' 
-    ? '/opt/render/project/data/ecotrack.db'
-    : path.join(os.homedir(), 'ecotrack-data', 'ecotrack.db');
-
-// Create data directory if it doesn't exist
-const dbDir = path.dirname(dbPath);
-if (!fs.existsSync(dbDir)) {
-    fs.mkdirSync(dbDir, { recursive: true });
-}
-
-const db = new sqlite3.Database(dbPath);
+// Initialize PostgreSQL connection
+const db = new Pool({
+    connectionString: process.env.DATABASE_URL || 'sqlite://ecotrack.db',
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+});
 
 // Create tables
-db.serialize(() => {
-    db.run(`CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+const initDB = async () => {
+    await db.query(`CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
         username TEXT UNIQUE,
         email TEXT UNIQUE,
         password TEXT,
         points INTEGER DEFAULT 0,
         level INTEGER DEFAULT 1,
         suspended INTEGER DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
 
-    db.run(`CREATE TABLE IF NOT EXISTS quiz_results (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
+    await db.query(`CREATE TABLE IF NOT EXISTS quiz_results (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id),
         score INTEGER,
         carbon_footprint REAL,
         answers TEXT,
-        completed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY(user_id) REFERENCES users(id)
+        completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
 
-    db.run(`CREATE TABLE IF NOT EXISTS rewards (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
+    await db.query(`CREATE TABLE IF NOT EXISTS rewards (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id),
         points INTEGER,
         description TEXT,
-        earned_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY(user_id) REFERENCES users(id)
+        earned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
 
-    db.run(`CREATE TABLE IF NOT EXISTS submissions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
+    await db.query(`CREATE TABLE IF NOT EXISTS submissions (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id),
         filename TEXT,
         description TEXT,
         status TEXT DEFAULT 'pending',
         points INTEGER DEFAULT 0,
-        submitted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        reviewed_at DATETIME,
-        FOREIGN KEY(user_id) REFERENCES users(id)
+        submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        reviewed_at TIMESTAMP
     )`);
-});
+};
+initDB();
 
 // Auth middleware
 const authenticateToken = (req, res, next) => {
